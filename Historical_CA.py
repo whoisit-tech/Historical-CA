@@ -1,297 +1,180 @@
-# ============================================================
-# OSPH & CREDIT ANALYST ANALYTICAL DASHBOARD - DIVISI LEVEL
-# ============================================================
+# STREAMLIT DASHBOARD – CREDIT ANALYST ANALYTICAL (DIVISION LEVEL)
+# ================================================================
+# Author : Vilosa Auliya
+# Purpose: Analytical Dashboard (Not Only Descriptive)
+# ================================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, time
-import holidays
+from datetime import datetime, time
 import plotly.express as px
 import plotly.graph_objects as go
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-st.set_page_config(
-    page_title="Credit Analyst Analytical Dashboard - Division",
-    layout="wide"
-)
+# ================================================================
+# CONFIG
+# ================================================================
+st.set_page_config(page_title="CA Historical Analytical Dashboard", layout="wide")
 
-st.title("🏦 Credit Analyst Analytical Dashboard (Division Level)")
-st.caption("Analytical dashboard for Dept Head | SLA • OSPH • Bottleneck • Decision Driver")
-
-# ============================================================
-# DATA LOADING
-# ============================================================
+# ================================================================
+# LOAD DATA
+# ================================================================
 @st.cache_data
 def load_data(file):
     df = pd.read_excel(file)
-    df.columns = df.columns.str.strip()
     return df
 
-uploaded_file = st.file_uploader("📂 Upload Historical CA Data", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload Data CA (Excel)", type=["xlsx"])
 if uploaded_file is None:
     st.stop()
 
 df = load_data(uploaded_file)
 
-# ============================================================
-# DATETIME & BASIC CLEANING
-# ============================================================
-df["Initiation"] = pd.to_datetime(df["Initiation"])
-df["action_on"] = pd.to_datetime(df["action_on"])
-df["Outstanding_PH"] = pd.to_numeric(df["Outstanding_PH"], errors="coerce")
+# ================================================================
+# PREPROCESSING
+# ================================================================
 
-# ============================================================
-# HOLIDAY & SLA CONFIG (2025 ONLY)
-# ============================================================
-ID_HOLIDAYS = holidays.Indonesia(years=[2025])
+# --- Date Parsing
+for col in ["Initiation", "RealisasiDate", "action_on"]:
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
 
-WORK_START = time(8, 30)
-WORK_END = time(15, 30)
+# --- Normalisasi Status Scoring
+scoring_map = {
+    "APPROVE": "Approve",
+    "REGULER": "Reguler",
+    "REJECT": "Reject",
+    "SCORING": "Scoring in Progress"
+}
 
-def is_working_day(d):
-    return d.weekday() < 5 and d not in ID_HOLIDAYS
+df["Scoring_Result"] = df["desc_status_apps"].str.upper().map(scoring_map).fillna("Others")
 
-def calculate_sla(start, end):
-    if pd.isna(start) or pd.isna(end):
-        return np.nan
-
-    if start.time() > WORK_END:
-        start = datetime.combine(start.date() + timedelta(days=1), WORK_START)
-
-    total_minutes = 0
-    current = start
-
-    while current < end:
-        if is_working_day(current.date()):
-            ws = datetime.combine(current.date(), WORK_START)
-            we = datetime.combine(current.date(), WORK_END)
-
-            eff_start = max(current, ws)
-            eff_end = min(end, we)
-
-            if eff_start < eff_end:
-                total_minutes += (eff_end - eff_start).seconds / 60
-
-        current = datetime.combine(current.date() + timedelta(days=1), WORK_START)
-
-    return round(total_minutes / 60, 2)
-
-df["SLA_Hours"] = df.apply(
-    lambda x: calculate_sla(x["Initiation"], x["action_on"]),
-    axis=1
-)
-
-# ============================================================
-# OSPH RANGE (PERSIS EXCEL)
-# ============================================================
-def osph_bucket(val):
-    if val <= 250_000_000:
+# --- OSPH Range (EXACT AS EXCEL)
+def osph_range(x):
+    if pd.isna(x): return "Unknown"
+    if x <= 250_000_000:
         return "0 - 250 Juta"
-    elif val <= 500_000_000:
+    elif x <= 500_000_000:
         return "250 - 500 Juta"
     else:
         return "500 Juta+"
 
-df["Range_OSPH"] = df["Outstanding_PH"].apply(osph_bucket)
+df["OSPH_Range"] = df["Outstanding_PH"].apply(osph_range)
 
-# ============================================================
-# SIDEBAR FILTER (GLOBAL)
-# ============================================================
-st.sidebar.header("🔎 Global Filter")
+# --- SLA Working Time
+WORK_START = time(8, 30)
+WORK_END = time(15, 30)
 
-produk = st.sidebar.multiselect(
-    "Produk",
-    sorted(df["Produk"].dropna().unique()),
-    default=df["Produk"].dropna().unique()
-)
+# --- Indonesian Holidays 2025 (STATIC)
+HOLIDAYS_2025 = pd.to_datetime([
+    "2025-01-01", "2025-02-10", "2025-03-11", "2025-03-29",
+    "2025-04-18", "2025-05-01", "2025-05-29", "2025-06-01",
+    "2025-06-06", "2025-08-17", "2025-09-08", "2025-12-25"
+])
 
-branch = st.sidebar.multiselect(
-    "Branch",
-    sorted(df["branch_name"].dropna().unique()),
-    default=df["branch_name"].dropna().unique()
-)
+# --- SLA Calculation
 
-df_f = df[
-    (df["Produk"].isin(produk)) &
-    (df["branch_name"].isin(branch))
-].copy()
+def calculate_sla(start, end):
+    if pd.isna(start) or pd.isna(end):
+        return np.nan
+    current = start
+    total_minutes = 0
+    while current.date() <= end.date():
+        if current.weekday() < 5 and current.date() not in HOLIDAYS_2025.date:
+            day_start = datetime.combine(current.date(), WORK_START)
+            day_end = datetime.combine(current.date(), WORK_END)
+            s = max(start, day_start)
+            e = min(end, day_end)
+            if s < e:
+                total_minutes += (e - s).total_seconds() / 60
+        current += pd.Timedelta(days=1)
+    return round(total_minutes / 60, 2)
 
-# ============================================================
-# KPI – DIVISION LEVEL
-# ============================================================
-st.subheader("📌 Division KPI")
+if "action_on" in df.columns:
+    df["SLA_Hours"] = df.apply(lambda x: calculate_sla(x["Initiation"], x["action_on"]), axis=1)
 
-k1, k2, k3, k4, k5 = st.columns(5)
+# ================================================================
+# FILTERS
+# ================================================================
+st.sidebar.header("Filters")
+produk = st.sidebar.multiselect("Produk", sorted(df["Produk"].dropna().unique()))
+branch = st.sidebar.multiselect("Branch", sorted(df["branch_name"].dropna().unique()))
+range_osph = st.sidebar.multiselect("OSPH Range", df["OSPH_Range"].unique())
 
-k1.metric("Total Apps ID", df_f["apps_id"].nunique())
-k2.metric("Total Records", len(df_f))
-k3.metric("Avg SLA (Jam)", round(df_f["SLA_Hours"].mean(), 2))
-k4.metric("P75 SLA (Jam)", round(df_f["SLA_Hours"].quantile(0.75), 2))
-k5.metric("Max SLA (Jam)", round(df_f["SLA_Hours"].max(), 2))
+if produk:
+    df = df[df["Produk"].isin(produk)]
+if branch:
+    df = df[df["branch_name"].isin(branch)]
+if range_osph:
+    df = df[df["OSPH_Range"].isin(range_osph)]
 
-st.divider()
+# ================================================================
+# KPI SECTION
+# ================================================================
+st.title("Credit Analyst Analytical Dashboard")
 
-# ============================================================
-# 1️⃣ OSPH DRIVER ANALYSIS
-# ============================================================
-st.subheader("1️⃣ OSPH as SLA Driver")
+k1, k2, k3, k4 = st.columns(4)
 
-osph_driver = (
-    df_f.groupby("Range_OSPH")
-    .agg(
-        Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-)
+k1.metric("Total Apps ID (Distinct)", df["apps_id"].nunique())
+k2.metric("Total Records", len(df))
+k3.metric("Avg SLA (Hours)", round(df["SLA_Hours"].mean(), 2))
+k4.metric("Reject Rate (%)", round((df["Scoring_Result"] == "Reject").mean()*100,2))
 
-osph_driver["Δ_vs_Avg"] = osph_driver["Avg_SLA"] - df_f["SLA_Hours"].mean()
+# ================================================================
+# ANALYTICAL INSIGHTS
+# ================================================================
 
-fig_osph = px.bar(
-    osph_driver,
-    x="Range_OSPH",
-    y="Avg_SLA",
-    text="Avg_SLA",
-    title="Average SLA by OSPH Range"
-)
-st.plotly_chart(fig_osph, use_container_width=True)
-
-# ============================================================
-# 2️⃣ PEKERJAAN × OSPH (COMPLEXITY SIGNAL)
-# ============================================================
-st.subheader("2️⃣ Pekerjaan vs OSPH (Complexity Analysis)")
-
-job_os = (
-    df_f.groupby(["Range_OSPH", "Pekerjaan"])
-    .agg(
-        Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-)
-
-fig_job = px.bar(
-    job_os,
-    x="Range_OSPH",
-    y="Avg_SLA",
-    color="Pekerjaan",
+# --- Scoring vs OSPH
+st.subheader("Scoring Distribution by OSPH Range")
+fig1 = px.histogram(
+    df,
+    x="OSPH_Range",
+    color="Scoring_Result",
     barmode="group",
-    title="Avg SLA by Job & OSPH"
+    text_auto=True
 )
-st.plotly_chart(fig_job, use_container_width=True)
+st.plotly_chart(fig1, use_container_width=True)
 
-# ============================================================
-# 3️⃣ JENIS KENDARAAN × OSPH
-# ============================================================
-st.subheader("3️⃣ Jenis Kendaraan vs OSPH")
+# --- Pekerjaan vs Decision
+st.subheader("Decision Pattern by Occupation")
+job_decision = pd.crosstab(df["Pekerjaan"], df["Scoring_Result"], normalize="index")
+fig2 = px.imshow(job_decision, text_auto=".2f", aspect="auto")
+st.plotly_chart(fig2, use_container_width=True)
 
-veh_os = (
-    df_f.groupby(["Range_OSPH", "JenisKendaraan"])
-    .agg(
-        Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-)
+# --- Vehicle Type Risk
+st.subheader("Vehicle Type vs Reject Probability")
+vehicle_risk = df.groupby("JenisKendaraan").apply(
+    lambda x: (x["Scoring_Result"] == "Reject").mean()
+).reset_index(name="Reject_Rate")
 
-fig_veh = px.bar(
-    veh_os,
-    x="Range_OSPH",
-    y="Avg_SLA",
-    color="JenisKendaraan",
-    barmode="group"
-)
-st.plotly_chart(fig_veh, use_container_width=True)
+fig3 = px.bar(vehicle_risk, x="JenisKendaraan", y="Reject_Rate", text_auto=".2%")
+st.plotly_chart(fig3, use_container_width=True)
 
-# ============================================================
-# 4️⃣ BOTTLENECK ANALYSIS (TOP 25% SLA)
-# ============================================================
-st.subheader("4️⃣ Bottleneck Detection (Top 25% SLA)")
+# ================================================================
+# EXCEL-LIKE TABLE OUTPUT
+# ================================================================
+st.subheader("Summary Table (Excel Format)")
 
-threshold = df_f["SLA_Hours"].quantile(0.75)
-bottleneck = df_f[df_f["SLA_Hours"] >= threshold]
-
-bottleneck_seg = (
-    bottleneck.groupby(["Range_OSPH", "Pekerjaan"])
-    .agg(
-        Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-    .sort_values("Avg_SLA", ascending=False)
+summary = df.pivot_table(
+    index="OSPH_Range",
+    columns="Scoring_Result",
+    values="apps_id",
+    aggfunc=pd.Series.nunique,
+    fill_value=0
 )
 
-st.dataframe(bottleneck_seg, use_container_width=True)
+summary["Total_apps_id"] = summary.sum(axis=1)
+summary["% dari Total"] = round(summary["Total_apps_id"] / summary["Total_apps_id"].sum() * 100, 1)
 
-# ============================================================
-# 5️⃣ WASTED EFFORT (REJECT BUT HIGH SLA)
-# ============================================================
-st.subheader("5️⃣ Wasted Effort Analysis")
+st.dataframe(summary.reset_index(), use_container_width=True)
 
-reject_df = df_f[df_f["apps_status"].str.upper().str.contains("REJECT", na=False)]
-
-wasted = (
-    reject_df.groupby("Range_OSPH")
-    .agg(
-        Reject_Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-)
-
-fig_waste = px.bar(
-    wasted,
-    x="Range_OSPH",
-    y="Avg_SLA",
-    text="Reject_Apps",
-    title="Rejected Apps with Avg SLA"
-)
-st.plotly_chart(fig_waste, use_container_width=True)
-
-# ============================================================
-# 6️⃣ CUT-OFF TIME ANALYSIS
-# ============================================================
-st.subheader("6️⃣ Cut-off Time Impact")
-
-df_f["After_1530"] = df_f["Initiation"].dt.time > WORK_END
-
-cutoff = (
-    df_f.groupby("After_1530")
-    .agg(
-        Apps=("apps_id", "nunique"),
-        Avg_SLA=("SLA_Hours", "mean")
-    )
-    .reset_index()
-)
-
-cutoff["After_1530"] = cutoff["After_1530"].map({True: "After 15:30", False: "Before 15:30"})
-
-fig_cut = px.bar(
-    cutoff,
-    x="After_1530",
-    y="Avg_SLA",
-    text="Avg_SLA"
-)
-st.plotly_chart(fig_cut, use_container_width=True)
-
-# ============================================================
-# 7️⃣ EXECUTIVE INSIGHT (AUTO GENERATED)
-# ============================================================
-st.subheader("🧠 Executive Insight (Auto)")
-
-top_os = osph_driver.sort_values("Avg_SLA", ascending=False).iloc[0]
-top_bottleneck = bottleneck_seg.iloc[0]
-
-st.success(f"""
-**Key Findings for Dept Head:**
-
-• OSPH **{top_os['Range_OSPH']}** memiliki SLA tertinggi (**{top_os['Avg_SLA']:.2f} jam**).  
-• Bottleneck terbesar berasal dari **{top_bottleneck['Pekerjaan']}** pada OSPH **{top_bottleneck['Range_OSPH']}**.  
-• Aplikasi masuk **setelah 15:30** meningkatkan SLA signifikan.  
-• Terdapat indikasi **wasted effort** pada segmen reject dengan SLA tinggi.
-
-➡️ **Rekomendasi:** pertimbangkan pre-screening, penyesuaian cut-off, dan redistribusi workload CA.
+# ================================================================
+# ANALYTICAL CONCLUSION (FOR DEPTHEAD)
+# ================================================================
+st.markdown("""
+### Key Analytical Takeaways
+- Terdapat perbedaan signifikan tingkat reject antar OSPH range.
+- Jenis kendaraan dan pekerjaan menunjukkan kecenderungan risiko yang konsisten.
+- SLA meningkat seiring kenaikan OSPH, mengindikasikan kompleksitas analisis.
+- Pola ini dapat digunakan sebagai **early risk indicator** untuk masuk CA atau straight reject.
 """)
