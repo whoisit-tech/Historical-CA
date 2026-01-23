@@ -17,13 +17,15 @@ st.title("Credit Analyst Historical Dashboard")
 # =========================================================
 # LOAD DATA (LANGSUNG DATAFRAME)
 # =========================================================
-FILE_NAME = "DataHistoricalCA.xlsx"
+@st.cache_data
+def load_data():
+    df = pd.read_excel(
+        "DataHistoricalCA.xlsx",
+        sheet_name="Sheet1"
+    )
+    return df
 
-if not Path(FILE_NAME).exists():
-    st.error(f"❌ File '{FILE_NAME}' tidak ditemukan di folder app.py")
-    st.stop()
-
-df = pd.read_excel(FILE_NAME)
+df_raw = load_data()
 
 # =========================================================
 # BASIC CLEANING
