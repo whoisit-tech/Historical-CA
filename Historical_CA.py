@@ -17,11 +17,13 @@ st.title("Credit Analyst Historical Dashboard")
 # =========================================================
 # LOAD DATA (LANGSUNG DATAFRAME)
 # =========================================================
-@st.cache_data
-def load_data():
-    return DataHistoricalCA.copy()
+FILE_NAME = "DataHistoricalCA.xlsx"
 
-df_raw = load_data()
+if not Path(FILE_NAME).exists():
+    st.error(f"❌ File '{FILE_NAME}' tidak ditemukan di folder app.py")
+    st.stop()
+
+df = pd.read_excel(FILE_NAME)
 
 # =========================================================
 # BASIC CLEANING
@@ -40,7 +42,7 @@ df_raw["Outstanding_PH"] = pd.to_numeric(
 # =========================================================
 df_ca = df_raw[
     df_raw["position_code"].str.upper().isin(
-        ["CA", "CA1", "CA2", "CREDIT_ANALYST"]
+        ["Credit Analyst Staff"]
     )
 ].copy()
 
