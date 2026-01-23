@@ -23,7 +23,7 @@ TANGGAL_MERAH = [
 ]
 
 HOLIDAYS = set(
-    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").normalize()
+    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").dt.date
 )
 
 # =========================
@@ -84,8 +84,19 @@ def calculate_sla(start, end):
 def load_data():
     df = pd.read_excel("DataHistoricalCA.xlsx")
 
-    df["initiation"] = pd.to_datetime(df["initiation"])
-    df["action_on"]  = pd.to_datetime(df["action_on"])
+    # rename kolom excel → standar dashboard
+    df = df.rename(columns={
+        "apps_id": "appid",
+        "Produk": "product",
+        "Hasil_Scoring_": "hasil_scoring",
+        "Outstanding_P": "osph",
+        "JenisKendaraan": "jenis_kendaraan",
+        "Initiation": "initiation"
+    })
+
+    df["initiation"] = pd.to_datetime(df["initiation"], errors="coerce")
+    df["action_on"]  = pd.to_datetime(df["action_on"], errors="coerce")
+    df["osph"] = pd.to_numeric(df["osph"], errors="coerce")
 
     df["osph_range"] = np.where(
         df["osph"] <= 250_000_000, "0-250 Juta",
