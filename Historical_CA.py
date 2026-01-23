@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📊 Credit Analyst Historical Dashboard (Divisi)")
+st.title("Credit Analyst Historical Dashboard")
 
 # =========================================================
 # LOAD DATA (LANGSUNG DATAFRAME)
@@ -101,9 +101,11 @@ WORK_START = time(8, 30)
 WORK_END = time(15, 30)
 
 HOLIDAYS = pd.to_datetime([
-    "2025-01-01","2025-03-31","2025-04-01",
-    "2025-05-01","2025-06-06","2025-08-17",
-    "2025-12-25"
+    "01-01-2025", "27-01-2025", "28-01-2025", "29-01-2025", "28-03-2025", "31-03-2025", "01-04-2025", "02-04-2025", "03-04-2025", 
+"04-04-2025", "07-04-2025", "18-04-2025", "01-05-2025", "12-05-2025", "29-05-2025", "06-06-2025", "09-06-2025", "27-06-2025", 
+"18-08-2025", "05-09-2025", "25-12-2025", "26-12-2025", "31-12-2025", "01-01-2026", "02-01-2026", "16-01-2026", "16-02-2026",
+"17-02-2026", "18-03-2026", "19-03-2026", "20-03-2026", "23-03-2026", "24-03-2026", "03-04-2026", "01-05-2026", "14-05-2026",
+"27-05-2026", "28-05-2026", "01-06-2026", "16-06-2026", "17-08-2026", "25-08-2026", "25-12-2026", "31-12-2026"
 ])
 
 def calc_sla(start, end):
@@ -139,7 +141,7 @@ df_ca_last["SLA_Hours"] = df_ca_last.apply(
 # =========================================================
 # SIDEBAR FILTER
 # =========================================================
-st.sidebar.header("🔎 Filter")
+st.sidebar.header(" Filter")
 
 produk = st.sidebar.multiselect(
     "Produk",
@@ -168,7 +170,7 @@ if osph:
 # =========================================================
 # KPI DIVISI
 # =========================================================
-st.subheader("📌 KPI Divisi CA")
+st.subheader(" KPI Divisi CA")
 
 k1, k2, k3, k4 = st.columns(4)
 
@@ -183,7 +185,7 @@ k4.metric(
 # =========================================================
 # ANALYTICAL – SCORING VS OSPH
 # =========================================================
-st.subheader("📊 Scoring vs OSPH")
+st.subheader(" Scoring vs OSPH")
 
 fig1 = px.histogram(
     df_f,
@@ -196,7 +198,7 @@ st.plotly_chart(fig1, use_container_width=True)
 # =========================================================
 # ANALYTICAL – KENDARAAN & PEKERJAAN
 # =========================================================
-st.subheader("🚗 Jenis Kendaraan vs Reject Rate")
+st.subheader(" Jenis Kendaraan vs Reject Rate")
 
 veh = (
     df_f.groupby("JenisKendaraan")
@@ -212,7 +214,7 @@ fig2 = px.bar(
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-st.subheader("👔 Pekerjaan vs Decision Pattern")
+st.subheader(" Pekerjaan vs Decision Pattern")
 
 job = pd.crosstab(
     df_f["Pekerjaan"],
@@ -226,7 +228,7 @@ st.plotly_chart(fig3, use_container_width=True)
 # =========================================================
 # EXCEL-LIKE SUMMARY (OSPH)
 # =========================================================
-st.subheader("📑 Summary OSPH (Excel Style)")
+st.subheader(" Summary OSPH (Excel Style)")
 
 summary = pd.pivot_table(
     df_f,
@@ -247,7 +249,7 @@ st.dataframe(summary.reset_index(), use_container_width=True)
 # =========================================================
 # RAW DETAIL (AUDIT)
 # =========================================================
-st.subheader("🧾 Raw Detail CA (Audit Layer)")
+st.subheader(" Raw Detail CA (Audit Layer)")
 st.dataframe(
     df_f[[
         "apps_id","Produk","branch_name","OSPH_Range",
@@ -258,7 +260,7 @@ st.dataframe(
 )
 
 st.markdown("""
-### 🔍 Insight untuk Dept Head
+###  Insight untuk Dept Head
 - OSPH tinggi menunjukkan reject rate lebih besar → indikasi early risk
 - Kombinasi kendaraan + pekerjaan tertentu konsisten masuk CA
 - SLA meningkat seiring kompleksitas aplikasi
