@@ -59,6 +59,9 @@ def calculate_sla(start, end):
     if current.time() > WORK_END:
         current = next_workday(current)
 
+    if current.time() < WORK_START:
+        current = datetime.combine(current.date(), WORK_START)
+
     while current < end:
         if is_workday(current):
             day_start = datetime.combine(current.date(), WORK_START)
@@ -68,7 +71,7 @@ def calculate_sla(start, end):
             end_time   = min(end, day_end)
 
             if start_time < end_time:
-                total_minutes += (end_time - start_time).seconds / 60
+                total_minutes += (end_time - start_time).total_seconds() / 60
 
         current = datetime.combine(current.date(), time(0,0)) + timedelta(days=1)
 
