@@ -23,7 +23,7 @@ TANGGAL_MERAH = [
 ]
 
 HOLIDAYS = set(
-    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").date
+    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").normalize()
 )
 
 # =========================
@@ -41,7 +41,7 @@ WORK_END   = time(15,30)
 # SLA FUNCTIONS
 # =========================
 def is_workday(dt):
-    return dt.weekday() < 5 and dt.date() not in HOLIDAYS
+    return dt.weekday() < 5 and pd.Timestamp(dt.date()) not in HOLIDAYS
 
 def next_workday(dt):
     dt += timedelta(days=1)
