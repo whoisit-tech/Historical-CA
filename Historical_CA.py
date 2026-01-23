@@ -23,7 +23,7 @@ TANGGAL_MERAH = [
 ]
 
 HOLIDAYS = set(
-    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").date
+    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").dt.date
 )
 
 # =========================
@@ -82,18 +82,16 @@ def calculate_sla(start, end):
 # =========================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("historical.csv")
+    df = pd.read_excel("DataHistoricalCA.xlsx")
 
     df["initiation"] = pd.to_datetime(df["initiation"])
     df["action_on"]  = pd.to_datetime(df["action_on"])
 
-    # OSPH Range
     df["osph_range"] = np.where(
         df["osph"] <= 250_000_000, "0-250 Juta",
         np.where(df["osph"] <= 500_000_000, "250-500 Juta", "500 Juta+")
     )
 
-    # SLA
     df["sla_hours"] = df.apply(
         lambda x: calculate_sla(x["initiation"], x["action_on"]),
         axis=1
