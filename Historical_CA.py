@@ -23,7 +23,7 @@ TANGGAL_MERAH = [
 ]
 
 HOLIDAYS = set(
-    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").dt.date
+    pd.to_datetime(TANGGAL_MERAH, format="%d-%m-%Y").date
 )
 
 # =========================
