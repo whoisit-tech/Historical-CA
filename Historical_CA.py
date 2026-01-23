@@ -44,7 +44,7 @@ df_raw["Outstanding_PH"] = pd.to_numeric(
 # =========================================================
 df_ca = df_raw[
     df_raw["position_code"].str.upper().isin(
-        ["Credit Analyst Staff"]
+        ["CA"]
     )
 ].copy()
 
