@@ -1,152 +1,175 @@
+# ================================================================
+# CREDIT ANALYST HISTORICAL ANALYTICAL DASHBOARD
+# LEVEL : DIVISION / DEPT HEAD
+# ================================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
+from pathlib import Path
 import plotly.express as px
-import plotly.graph_objects as go
 
 # ================================================================
-# CONFIG
+# PAGE CONFIG
 # ================================================================
-st.set_page_config(page_title="CA Historical Analytical Dashboard", layout="wide")
+st.set_page_config(
+    page_title="CA Historical – Analytical Dashboard",
+    layout="wide"
+)
 
-# ======================
-# LOAD EXCEL FILE
-# ======================
-FILE_NAME = "DataHistoricalCA.xlsx"
+# ================================================================
+# DATA LOADING
+# ================================================================
+DATA_FILE = "DataHistoricalCA.xlsx"
 
-if not Path(FILE_NAME).exists():
-    st.error(f"❌ File '{FILE_NAME}' tidak ditemukan di folder app.py")
+if not Path(DATA_FILE).exists():
+    st.error("❌ DataHistoricalCA.xlsx tidak ditemukan di repository")
     st.stop()
 
-df = pd.read_excel(FILE_NAME)
+df_raw = pd.read_excel(DATA_FILE)
+df = df_raw.copy()
 
 # ================================================================
-# PREPROCESSING
+# PREPROCESSING SECTION
 # ================================================================
 
 # --- Date Parsing
-for col in ["Initiation", "RealisasiDate", "action_on"]:
-    if col in df.columns:
-        df[col] = pd.to_datetime(df[col], errors="coerce")
+date_cols = ["Initiation", "RealisasiDate", "action_on"]
+for c in date_cols:
+    if c in df.columns:
+        df[c] = pd.to_datetime(df[c], errors="coerce")
 
-# --- Normalisasi Status Scoring
+# --- Scoring Mapping (MATCH EXCEL)
 scoring_map = {
     "APPROVE": "Approve",
     "REGULER": "Reguler",
     "REJECT": "Reject",
-    "SCORING": "Scoring in Progress"
+    "SCORING": "Scoring In Progress"
 }
 
-df["Scoring_Result"] = df["desc_status_apps"].str.upper().map(scoring_map).fillna("Others")
+df["Scoring_Result"] = (
+    df["desc_status_apps"]
+    .astype(str)
+    .str.upper()
+    .map(scoring_map)
+    .fillna("Others")
+)
 
-# --- OSPH Range (EXACT AS EXCEL)
-def osph_range(x):
-    if pd.isna(x): return "Unknown"
-    if x <= 250_000_000:
-        return "0 - 250 Juta"
+# ================================================================
+# OSPH BUCKETING (EXCEL STANDARD)
+# ================================================================
+def osph_bucket(x):
+    if pd.isna(x):
+        return "Unknown"
+    elif x <= 250_000_000:
+        return "0 – 250 Juta"
     elif x <= 500_000_000:
-        return "250 - 500 Juta"
+        return "250 – 500 Juta"
     else:
-        return "500 Juta+"
+        return "> 500 Juta"
 
-df["OSPH_Range"] = df["Outstanding_PH"].apply(osph_range)
+df["OSPH_Range"] = df["Outstanding_PH"].apply(osph_bucket)
 
-# --- SLA Working Time
+# ================================================================
+# SLA CONFIGURATION
+# ================================================================
 WORK_START = time(8, 30)
-WORK_END = time(15, 30)
+WORK_END   = time(15, 30)
 
-# --- Indonesian Holidays 2025 (STATIC)
-HOLIDAYS_2025 = pd.to_datetime([
-    "01-01-2025", "27-01-2025", "28-01-2025", "29-01-2025", "28-03-2025", "31-03-2025", "01-04-2025", "02-04-2025", "03-04-2025", 
-"04-04-2025", "07-04-2025", "18-04-2025", "01-05-2025", "12-05-2025", "29-05-2025", "06-06-2025", "09-06-2025", "27-06-2025", 
-"18-08-2025", "05-09-2025", "25-12-2025", "26-12-2025", "31-12-2025", "01-01-2026", "02-01-2026", "16-01-2026", "16-02-2026",
-"17-02-2026", "18-03-2026", "19-03-2026", "20-03-2026", "23-03-2026", "24-03-2026", "03-04-2026", "01-05-2026", "14-05-2026",
-"27-05-2026", "28-05-2026", "01-06-2026", "16-06-2026", "17-08-2026", "25-08-2026", "25-12-2026", "31-12-2026"
+HOLIDAYS = pd.to_datetime([
+    "2025-01-01","2025-01-27","2025-01-28","2025-01-29",
+    "2025-03-28","2025-03-31",
+    "2025-04-01","2025-04-02","2025-04-03","2025-04-04","2025-04-07",
+    "2025-04-18","2025-05-01","2025-05-12","2025-05-29",
+    "2025-06-06","2025-06-09","2025-06-27",
+    "2025-08-18","2025-09-05",
+    "2025-12-25","2025-12-26","2025-12-31"
 ])
 
-# --- SLA Calculation
+HOLIDAYS_SET = set(HOLIDAYS.date)
 
 def calculate_sla(start, end):
     if pd.isna(start) or pd.isna(end):
         return np.nan
-    current = start
+
     total_minutes = 0
-    while current.date() <= end.date():
-        if current.weekday() < 5 and current.date() not in HOLIDAYS_2025.date:
-            day_start = datetime.combine(current.date(), WORK_START)
-            day_end = datetime.combine(current.date(), WORK_END)
-            s = max(start, day_start)
-            e = min(end, day_end)
+    cur = start.date()
+
+    while cur <= end.date():
+        if cur.weekday() < 5 and cur not in HOLIDAYS_SET:
+            s = max(start, datetime.combine(cur, WORK_START))
+            e = min(end, datetime.combine(cur, WORK_END))
             if s < e:
-                total_minutes += (e - s).total_seconds() / 60
-        current += pd.Timedelta(days=1)
+                total_minutes += (e - s).seconds / 60
+        cur += pd.Timedelta(days=1)
+
     return round(total_minutes / 60, 2)
 
-if "action_on" in df.columns:
-    df["SLA_Hours"] = df.apply(lambda x: calculate_sla(x["Initiation"], x["action_on"]), axis=1)
+df["SLA_Hours"] = df.apply(
+    lambda x: calculate_sla(x["Initiation"], x["action_on"]),
+    axis=1
+)
+
+df["SLA_Breach"] = np.where(df["SLA_Hours"] > 6, "Yes", "No")
 
 # ================================================================
 # FILTERS
 # ================================================================
 st.sidebar.header("Filters")
-produk = st.sidebar.multiselect("Produk", sorted(df["Produk"].dropna().unique()))
-branch = st.sidebar.multiselect("Branch", sorted(df["branch_name"].dropna().unique()))
-range_osph = st.sidebar.multiselect("OSPH Range", df["OSPH_Range"].unique())
+
+produk = st.sidebar.multiselect("Produk", df["Produk"].dropna().unique())
+branch = st.sidebar.multiselect("Branch", df["branch_name"].dropna().unique())
+osph   = st.sidebar.multiselect("OSPH Range", df["OSPH_Range"].unique())
 
 if produk:
     df = df[df["Produk"].isin(produk)]
 if branch:
     df = df[df["branch_name"].isin(branch)]
-if range_osph:
-    df = df[df["OSPH_Range"].isin(range_osph)]
+if osph:
+    df = df[df["OSPH_Range"].isin(osph)]
 
 # ================================================================
 # KPI SECTION
 # ================================================================
-st.title("Credit Analyst Analytical Dashboard")
+st.title("Credit Analyst Historical – Analytical Dashboard")
 
-k1, k2, k3, k4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 
-k1.metric("Total Apps ID (Distinct)", df["apps_id"].nunique())
-k2.metric("Total Records", len(df))
-k3.metric("Avg SLA (Hours)", round(df["SLA_Hours"].mean(), 2))
-k4.metric("Reject Rate (%)", round((df["Scoring_Result"] == "Reject").mean()*100,2))
+c1.metric("Distinct Apps ID", df["apps_id"].nunique())
+c2.metric("Total Record", len(df))
+c3.metric("Avg SLA (Hours)", round(df["SLA_Hours"].mean(),2))
+c4.metric("Reject Rate (%)", round((df["Scoring_Result"]=="Reject").mean()*100,2))
+c5.metric("SLA Breach (%)", round((df["SLA_Breach"]=="Yes").mean()*100,2))
 
 # ================================================================
-# ANALYTICAL INSIGHTS
+# ANALYTICAL SECTION
 # ================================================================
 
-# --- Scoring vs OSPH
-st.subheader("Scoring Distribution by OSPH Range")
-fig1 = px.histogram(
-    df,
-    x="OSPH_Range",
-    color="Scoring_Result",
-    barmode="group",
-    text_auto=True
+st.subheader("1️⃣ OSPH vs Decision (Risk Concentration)")
+st.plotly_chart(
+    px.histogram(df, x="OSPH_Range", color="Scoring_Result", barmode="group"),
+    use_container_width=True
 )
-st.plotly_chart(fig1, use_container_width=True)
 
-# --- Pekerjaan vs Decision
-st.subheader("Decision Pattern by Occupation")
-job_decision = pd.crosstab(df["Pekerjaan"], df["Scoring_Result"], normalize="index")
-fig2 = px.imshow(job_decision, text_auto=".2f", aspect="auto")
-st.plotly_chart(fig2, use_container_width=True)
+st.subheader("2️⃣ Occupation Risk Pattern")
+occ_matrix = pd.crosstab(df["Pekerjaan"], df["Scoring_Result"], normalize="index")
+st.plotly_chart(px.imshow(occ_matrix, aspect="auto", text_auto=".2f"))
 
-# --- Vehicle Type Risk
-st.subheader("Vehicle Type vs Reject Probability")
-vehicle_risk = df.groupby("JenisKendaraan").apply(
-    lambda x: (x["Scoring_Result"] == "Reject").mean()
+st.subheader("3️⃣ Vehicle Type – Reject Propensity")
+veh = df.groupby("JenisKendaraan").apply(
+    lambda x: (x["Scoring_Result"]=="Reject").mean()
 ).reset_index(name="Reject_Rate")
+st.plotly_chart(px.bar(veh, x="JenisKendaraan", y="Reject_Rate", text_auto=".2%"))
 
-fig3 = px.bar(vehicle_risk, x="JenisKendaraan", y="Reject_Rate", text_auto=".2%")
-st.plotly_chart(fig3, use_container_width=True)
+st.subheader("4️⃣ SLA Breach vs OSPH")
+sla_tab = pd.crosstab(df["OSPH_Range"], df["SLA_Breach"], normalize="index")
+st.dataframe(sla_tab.style.format("{:.2%}"))
 
 # ================================================================
-# EXCEL-LIKE TABLE OUTPUT
+# EXCEL-LIKE SUMMARY TABLE
 # ================================================================
-st.subheader("Summary Table (Excel Format)")
+st.subheader("Summary – Excel Equivalent")
 
 summary = df.pivot_table(
     index="OSPH_Range",
@@ -156,18 +179,18 @@ summary = df.pivot_table(
     fill_value=0
 )
 
-summary["Total_apps_id"] = summary.sum(axis=1)
-summary["% dari Total"] = round(summary["Total_apps_id"] / summary["Total_apps_id"].sum() * 100, 1)
+summary["Total"] = summary.sum(axis=1)
+summary["% Contribution"] = (summary["Total"] / summary["Total"].sum() * 100).round(1)
 
 st.dataframe(summary.reset_index(), use_container_width=True)
 
 # ================================================================
-# ANALYTICAL CONCLUSION (FOR DEPTHEAD)
+# MANAGEMENT INSIGHT
 # ================================================================
 st.markdown("""
-### Key Analytical Takeaways
-- Terdapat perbedaan signifikan tingkat reject antar OSPH range.
-- Jenis kendaraan dan pekerjaan menunjukkan kecenderungan risiko yang konsisten.
-- SLA meningkat seiring kenaikan OSPH, mengindikasikan kompleksitas analisis.
-- Pola ini dapat digunakan sebagai **early risk indicator** untuk masuk CA atau straight reject.
+### 🔍 Key Analytical Insight (Dept Head)
+- OSPH tinggi memiliki reject propensity & SLA breach lebih besar
+- Kombinasi pekerjaan & kendaraan membentuk **risk cluster**
+- Bisa dijadikan **early rule** sebelum masuk CA
+- Mendukung keputusan **capacity planning & policy adjustment**
 """)
