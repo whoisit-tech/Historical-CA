@@ -1,9 +1,3 @@
-# STREAMLIT DASHBOARD – CREDIT ANALYST ANALYTICAL (DIVISION LEVEL)
-# ================================================================
-# Author : Vilosa Auliya
-# Purpose: Analytical Dashboard (Not Only Descriptive)
-# ================================================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,19 +10,16 @@ import plotly.graph_objects as go
 # ================================================================
 st.set_page_config(page_title="CA Historical Analytical Dashboard", layout="wide")
 
-# ================================================================
-# LOAD DATA
-# ================================================================
-@st.cache_data
-def load_data(file):
-    df = pd.read_excel(file)
-    return df
+# ======================
+# LOAD EXCEL FILE
+# ======================
+FILE_NAME = "DataHistoricalCA.xlsx"
 
-uploaded_file = st.file_uploader("Upload Data CA (Excel)", type=["xlsx"])
-if uploaded_file is None:
+if not Path(FILE_NAME).exists():
+    st.error(f"❌ File '{FILE_NAME}' tidak ditemukan di folder app.py")
     st.stop()
 
-df = load_data(uploaded_file)
+df = pd.read_excel(FILE_NAME)
 
 # ================================================================
 # PREPROCESSING
@@ -67,9 +58,11 @@ WORK_END = time(15, 30)
 
 # --- Indonesian Holidays 2025 (STATIC)
 HOLIDAYS_2025 = pd.to_datetime([
-    "2025-01-01", "2025-02-10", "2025-03-11", "2025-03-29",
-    "2025-04-18", "2025-05-01", "2025-05-29", "2025-06-01",
-    "2025-06-06", "2025-08-17", "2025-09-08", "2025-12-25"
+    "01-01-2025", "27-01-2025", "28-01-2025", "29-01-2025", "28-03-2025", "31-03-2025", "01-04-2025", "02-04-2025", "03-04-2025", 
+"04-04-2025", "07-04-2025", "18-04-2025", "01-05-2025", "12-05-2025", "29-05-2025", "06-06-2025", "09-06-2025", "27-06-2025", 
+"18-08-2025", "05-09-2025", "25-12-2025", "26-12-2025", "31-12-2025", "01-01-2026", "02-01-2026", "16-01-2026", "16-02-2026",
+"17-02-2026", "18-03-2026", "19-03-2026", "20-03-2026", "23-03-2026", "24-03-2026", "03-04-2026", "01-05-2026", "14-05-2026",
+"27-05-2026", "28-05-2026", "01-06-2026", "16-06-2026", "17-08-2026", "25-08-2026", "25-12-2026", "31-12-2026"
 ])
 
 # --- SLA Calculation
