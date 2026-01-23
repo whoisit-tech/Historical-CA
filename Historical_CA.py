@@ -88,8 +88,8 @@ def load_data():
     df = df.rename(columns={
         "apps_id": "appid",
         "Produk": "product",
-        "Hasil_Scoring_": "hasil_scoring",
-        "Outstanding_P": "osph",
+        "Hasil_Scoring_1": "hasil_scoring",
+        "Outstanding_PH": "osph",
         "JenisKendaraan": "jenis_kendaraan",
         "Initiation": "initiation"
     })
