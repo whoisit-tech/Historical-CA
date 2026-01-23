@@ -1,83 +1,36 @@
 # ================================================================
-# CREDIT ANALYST HISTORICAL ANALYTICAL DASHBOARD
-# LEVEL : DIVISION / DEPT HEAD
+# CREDIT ANALYST HISTORICAL – HARDCORE DIVISION DASHBOARD
 # ================================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, time
 from pathlib import Path
+from datetime import datetime, time
 import plotly.express as px
+import plotly.graph_objects as go
 
 # ================================================================
 # PAGE CONFIG
 # ================================================================
 st.set_page_config(
-    page_title="CA Historical – Analytical Dashboard",
-    layout="wide"
+    page_title="CA Division Hardcore Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # ================================================================
-# DATA LOADING
+# FILE CONFIG
 # ================================================================
 DATA_FILE = "DataHistoricalCA.xlsx"
 
-if not Path(DATA_FILE).exists():
-    st.error("❌ DataHistoricalCA.xlsx tidak ditemukan di repository")
-    st.stop()
-
-df_raw = pd.read_excel(DATA_FILE)
-df = df_raw.copy()
-
-# ================================================================
-# PREPROCESSING SECTION
-# ================================================================
-
-# --- Date Parsing
-date_cols = ["Initiation", "RealisasiDate", "action_on"]
-for c in date_cols:
-    if c in df.columns:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
-
-# --- Scoring Mapping (MATCH EXCEL)
-scoring_map = {
-    "APPROVE": "Approve",
-    "REGULER": "Reguler",
-    "REJECT": "Reject",
-    "SCORING": "Scoring In Progress"
-}
-
-df["Scoring_Result"] = (
-    df["desc_status_apps"]
-    .astype(str)
-    .str.upper()
-    .map(scoring_map)
-    .fillna("Others")
-)
-
-# ================================================================
-# OSPH BUCKETING (EXCEL STANDARD)
-# ================================================================
-def osph_bucket(x):
-    if pd.isna(x):
-        return "Unknown"
-    elif x <= 250_000_000:
-        return "0 – 250 Juta"
-    elif x <= 500_000_000:
-        return "250 – 500 Juta"
-    else:
-        return "> 500 Juta"
-
-df["OSPH_Range"] = df["Outstanding_PH"].apply(osph_bucket)
-
-# ================================================================
-# SLA CONFIGURATION
-# ================================================================
 WORK_START = time(8, 30)
 WORK_END   = time(15, 30)
 
-HOLIDAYS = pd.to_datetime([
+# ================================================================
+# HOLIDAYS 2025 (FIX)
+# ================================================================
+HOLIDAYS_2025 = pd.to_datetime([
     "2025-01-01","2025-01-27","2025-01-28","2025-01-29",
     "2025-03-28","2025-03-31",
     "2025-04-01","2025-04-02","2025-04-03","2025-04-04","2025-04-07",
@@ -85,102 +38,229 @@ HOLIDAYS = pd.to_datetime([
     "2025-06-06","2025-06-09","2025-06-27",
     "2025-08-18","2025-09-05",
     "2025-12-25","2025-12-26","2025-12-31"
-])
+]).date
 
-HOLIDAYS_SET = set(HOLIDAYS.date)
+# ================================================================
+# LOAD DATA
+# ================================================================
+if not Path(DATA_FILE).exists():
+    st.error("❌ DataHistoricalCA.xlsx tidak ditemukan")
+    st.stop()
 
+df_raw = pd.read_excel(DATA_FILE)
+
+# ================================================================
+# RAW BACKUP (IMPORTANT FOR AUDIT)
+# ================================================================
+df_raw_backup = df_raw.copy()
+
+# ================================================================
+# DATE PARSING
+# ================================================================
+DATE_COLS = ["Initiation","RealisasiDate","action_on"]
+for c in DATE_COLS:
+    if c in df_raw.columns:
+        df_raw[c] = pd.to_datetime(df_raw[c], errors="coerce")
+
+# ================================================================
+# APPS STATUS NORMALIZATION (HARDCORE)
+# ================================================================
+def normalize_apps_status(x):
+    if pd.isna(x): return "UNKNOWN"
+    x = str(x).upper().strip()
+
+    if "REJECT" in x:
+        return "REJECT"
+    if "APPROVE" in x:
+        return "APPROVE"
+    if "REGULER" in x:
+        return "REGULER"
+    if "SCORING" in x:
+        return "SCORING"
+    if x in ["-", ""]:
+        return "UNDEFINED"
+
+    return "OTHERS"
+
+df_raw["apps_status_raw"] = df_raw["desc_status_apps"]
+df_raw["apps_status_group"] = df_raw["desc_status_apps"].apply(normalize_apps_status)
+
+# ================================================================
+# DECISION FINAL (BANK STYLE)
+# ================================================================
+def decision_engine(row):
+    status = row["apps_status_group"]
+
+    if status == "REJECT":
+        return "FAIL"
+    if status == "APPROVE":
+        return "PASS"
+    if status == "REGULER":
+        return "CONDITIONAL"
+    if status == "SCORING":
+        return "PENDING"
+    return "REVIEW"
+
+df_raw["decision_final"] = df_raw.apply(decision_engine, axis=1)
+
+# ================================================================
+# OSPH BUCKET (EXCEL MATCH)
+# ================================================================
+def osph_bucket(v):
+    if pd.isna(v): return "UNKNOWN"
+    if v <= 250_000_000:
+        return "0–250 Juta"
+    elif v <= 500_000_000:
+        return "250–500 Juta"
+    elif v <= 1_000_000_000:
+        return "500 Juta–1 M"
+    else:
+        return ">1 M"
+
+df_raw["OSPH_RANGE"] = df_raw["Outstanding_PH"].apply(osph_bucket)
+
+# ================================================================
+# SLA ENGINE (WORKING HOURS + HOLIDAY)
+# ================================================================
 def calculate_sla(start, end):
     if pd.isna(start) or pd.isna(end):
         return np.nan
 
     total_minutes = 0
-    cur = start.date()
+    current = start
 
-    while cur <= end.date():
-        if cur.weekday() < 5 and cur not in HOLIDAYS_SET:
-            s = max(start, datetime.combine(cur, WORK_START))
-            e = min(end, datetime.combine(cur, WORK_END))
+    while current.date() <= end.date():
+        if current.weekday() < 5 and current.date() not in HOLIDAYS_2025:
+            day_start = datetime.combine(current.date(), WORK_START)
+            day_end   = datetime.combine(current.date(), WORK_END)
+
+            s = max(start, day_start)
+            e = min(end, day_end)
+
             if s < e:
-                total_minutes += (e - s).seconds / 60
-        cur += pd.Timedelta(days=1)
+                total_minutes += (e - s).total_seconds() / 60
+
+        current += pd.Timedelta(days=1)
 
     return round(total_minutes / 60, 2)
 
-df["SLA_Hours"] = df.apply(
-    lambda x: calculate_sla(x["Initiation"], x["action_on"]),
+df_raw["SLA_HOURS"] = df_raw.apply(
+    lambda r: calculate_sla(r["Initiation"], r["action_on"]),
     axis=1
 )
 
-df["SLA_Breach"] = np.where(df["SLA_Hours"] > 6, "Yes", "No")
+# ================================================================
+# RISK ENGINE (ANALYTICAL)
+# ================================================================
+def risk_engine(row):
+    if row["decision_final"] == "FAIL":
+        return "HIGH RISK"
+    if row["OSPH_RANGE"] in [">1 M","500 Juta–1 M"] and row["SLA_HOURS"] > 24:
+        return "PROCESS + CREDIT RISK"
+    if row["decision_final"] == "PASS" and row["SLA_HOURS"] <= 8:
+        return "LOW RISK"
+    return "MEDIUM RISK"
+
+df_raw["risk_category"] = df_raw.apply(risk_engine, axis=1)
 
 # ================================================================
-# FILTERS
+# SIDEBAR FILTER
 # ================================================================
-st.sidebar.header("Filters")
+st.sidebar.header("Filter")
 
-produk = st.sidebar.multiselect("Produk", df["Produk"].dropna().unique())
-branch = st.sidebar.multiselect("Branch", df["branch_name"].dropna().unique())
-osph   = st.sidebar.multiselect("OSPH Range", df["OSPH_Range"].unique())
+branch = st.sidebar.multiselect(
+    "Branch", sorted(df_raw["branch_name"].dropna().unique())
+)
 
-if produk:
-    df = df[df["Produk"].isin(produk)]
+produk = st.sidebar.multiselect(
+    "Produk", sorted(df_raw["Produk"].dropna().unique())
+)
+
+decision = st.sidebar.multiselect(
+    "Decision Final", sorted(df_raw["decision_final"].unique())
+)
+
+df = df_raw.copy()
+
 if branch:
     df = df[df["branch_name"].isin(branch)]
-if osph:
-    df = df[df["OSPH_Range"].isin(osph)]
+if produk:
+    df = df[df["Produk"].isin(produk)]
+if decision:
+    df = df[df["decision_final"].isin(decision)]
 
 # ================================================================
-# KPI SECTION
+# KPI DIVISION
 # ================================================================
-st.title("Credit Analyst Historical – Analytical Dashboard")
+st.title("🏦 Credit Analyst Hardcore Division Dashboard")
 
-c1, c2, c3, c4, c5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 
-c1.metric("Distinct Apps ID", df["apps_id"].nunique())
-c2.metric("Total Record", len(df))
-c3.metric("Avg SLA (Hours)", round(df["SLA_Hours"].mean(),2))
-c4.metric("Reject Rate (%)", round((df["Scoring_Result"]=="Reject").mean()*100,2))
-c5.metric("SLA Breach (%)", round((df["SLA_Breach"]=="Yes").mean()*100,2))
+k1.metric("Apps ID (Distinct)", df["apps_id"].nunique())
+k2.metric("Total Records", len(df))
+k3.metric("Reject Rate (%)", round((df["decision_final"]=="FAIL").mean()*100,2))
+k4.metric("Conditional (%)", round((df["decision_final"]=="CONDITIONAL").mean()*100,2))
+k5.metric("Avg SLA (Hours)", round(df["SLA_HOURS"].mean(),2))
+k6.metric("High Risk (%)", round((df["risk_category"].str.contains("HIGH")).mean()*100,2))
 
 # ================================================================
-# ANALYTICAL SECTION
+# ANALYTICAL – STATUS DISTRIBUTION
 # ================================================================
+st.subheader("Apps Status Distribution (RAW vs GROUP)")
 
-st.subheader("1️⃣ OSPH vs Decision (Risk Concentration)")
-st.plotly_chart(
-    px.histogram(df, x="OSPH_Range", color="Scoring_Result", barmode="group"),
+fig1 = px.histogram(
+    df,
+    x="apps_status_raw",
+    color="apps_status_group",
+    barmode="group"
+)
+st.plotly_chart(fig1, use_container_width=True)
+
+# ================================================================
+# OSPH vs DECISION
+# ================================================================
+st.subheader("OSPH Range vs Decision Outcome")
+
+fig2 = px.histogram(
+    df,
+    x="OSPH_RANGE",
+    color="decision_final",
+    barmode="group",
+    text_auto=True
+)
+st.plotly_chart(fig2, use_container_width=True)
+
+# ================================================================
+# RAW DETAIL TABLE (DIVISI WAJIB ADA)
+# ================================================================
+st.subheader("Raw Detail (Audit View)")
+
+st.dataframe(
+    df[[
+        "apps_id","branch_name","Produk",
+        "apps_status_raw","apps_status_group","decision_final",
+        "OSPH_RANGE","Outstanding_PH",
+        "SLA_HOURS","risk_category"
+    ]],
     use_container_width=True
 )
 
-st.subheader("2️⃣ Occupation Risk Pattern")
-occ_matrix = pd.crosstab(df["Pekerjaan"], df["Scoring_Result"], normalize="index")
-st.plotly_chart(px.imshow(occ_matrix, aspect="auto", text_auto=".2f"))
-
-st.subheader("3️⃣ Vehicle Type – Reject Propensity")
-veh = df.groupby("JenisKendaraan").apply(
-    lambda x: (x["Scoring_Result"]=="Reject").mean()
-).reset_index(name="Reject_Rate")
-st.plotly_chart(px.bar(veh, x="JenisKendaraan", y="Reject_Rate", text_auto=".2%"))
-
-st.subheader("4️⃣ SLA Breach vs OSPH")
-sla_tab = pd.crosstab(df["OSPH_Range"], df["SLA_Breach"], normalize="index")
-st.dataframe(sla_tab.style.format("{:.2%}"))
-
 # ================================================================
-# EXCEL-LIKE SUMMARY TABLE
+# EXCEL-LIKE SUMMARY
 # ================================================================
-st.subheader("Summary – Excel Equivalent")
+st.subheader("Executive Summary (Excel Output)")
 
-summary = df.pivot_table(
-    index="OSPH_Range",
-    columns="Scoring_Result",
+summary = pd.pivot_table(
+    df,
+    index="OSPH_RANGE",
+    columns="decision_final",
     values="apps_id",
     aggfunc=pd.Series.nunique,
     fill_value=0
 )
 
-summary["Total"] = summary.sum(axis=1)
-summary["% Contribution"] = (summary["Total"] / summary["Total"].sum() * 100).round(1)
+summary["TOTAL"] = summary.sum(axis=1)
+summary["PERCENT"] = round(summary["TOTAL"]/summary["TOTAL"].sum()*100,2)
 
 st.dataframe(summary.reset_index(), use_container_width=True)
 
@@ -188,9 +268,9 @@ st.dataframe(summary.reset_index(), use_container_width=True)
 # MANAGEMENT INSIGHT
 # ================================================================
 st.markdown("""
-### 🔍 Key Analytical Insight (Dept Head)
-- OSPH tinggi memiliki reject propensity & SLA breach lebih besar
-- Kombinasi pekerjaan & kendaraan membentuk **risk cluster**
-- Bisa dijadikan **early rule** sebelum masuk CA
-- Mendukung keputusan **capacity planning & policy adjustment**
+### 🔥 Division-Level Analytical Insight
+- Multiple approval layers (Approve 1/2, Reguler 1/2) terbukti **tidak homogen**
+- OSPH tinggi + SLA panjang → indikasi **process & credit risk**
+- Branch dengan dominasi conditional perlu **policy tightening**
+- Framework ini bisa jadi **early filtering sebelum CA**
 """)
